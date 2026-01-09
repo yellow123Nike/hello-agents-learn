@@ -1,0 +1,40 @@
+# local visual studio settings file
+.vscode
+.gradio
+.postgres_data
+
+# bazel
+bazel-*
+
+.vscode/settings.json
+env/log/sys_log/*
+# local test
+removeTestFile.bat
+.idea
+debug_pai/*
+# local python yte-compiled files
+*.pyc
+*__pycache__
+
+# files when produce .whl 
+pai.egg-info
+dist
+
+*.ipynb_checkpoints
+test_pai
+test_env
+*.pyc
+*__pycache__
+
+*.so
+.env
+
+.clwb
+build/
+
+*.log
+test/graphrag.ipynb
+test/test.py
+test/test.ipynb
+
+schemalink_result/
