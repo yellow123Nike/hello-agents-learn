@@ -11,8 +11,8 @@ class StdoutPrinter(Printer):
 
     def send(
         self,
-        message_type: str,
         message: Any,
+        message_type: Optional[str] = "other",
         message_id: Optional[str] = None,
         digital_employee: Optional[str] = None,
         is_final: Optional[bool] = None,

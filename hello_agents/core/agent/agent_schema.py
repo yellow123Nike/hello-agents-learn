@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, List, Optional, Any
+from typing import TYPE_CHECKING, List, Literal, Optional, Any
 
+from hello_agents.core.llm.llm_schema import ToolChoice
 from hello_agents.core.tool.tool_collection import ToolCollection
 if TYPE_CHECKING:
     from hello_agents.core.printer.printer import Printer
@@ -37,6 +38,7 @@ class AgentContext:
 
     # ========= 工具与能力 =========
     tool_collection: Optional[ToolCollection] = None  # ToolCollection
+    tool_choice: Literal["auto", "none", "required"] = "auto"  # ToolChoice
 
     # ========= Prompt & 模板 =========
     sop_prompt: Optional[str] = None

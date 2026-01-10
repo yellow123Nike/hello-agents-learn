@@ -59,6 +59,7 @@
         run():生命周期控制+错误与终止处理
         execute_tools:agent的基础能力，和HelloAgents理念一致，一切皆工具
         update_memory：上下文内存管理,动态更新上下文
+        generate_digital_employee:让 LLM 根据当前任务，动态“选择 / 生成一个合适的数字员工（角色 + 工具组合）”，并据此更新 Agent 当前可用的工具集合
     短期记忆组件(Memory): 负责维护、裁剪、读取“对话与执行历史”，为 LLM 下一步决策提供上下文。 
 
 ## printer
@@ -67,3 +68,22 @@
 ## tool
     工具抽象(basetool)：抽象工具描述(to_params)和工具执行逻辑(execute)。工具描述是告诉大模型这个工具需要什么参数。工具执行一旦 LLM 选定工具，系统就必须“无条件执行”
     mcptool：
+
+# agents_design
+    agents设计范式：react、reflection、plan-solve (hello-agent中的simpleagent本质上是一个react范式，故不实现，可直接通过react构造实例)
+
+## react
+    react范式的核心是边想边做，具有强环境适应性和动态纠错能力，是处理探索性、需要外部工具输入的任务的首选。
+    react范式的局限性是步进式的决策模式意味着智能体缺乏一个全局的、长远的规划，可能陷入局部最优。
+    具体范式可用抽象为：loop(思考-行动-观察)
+
+    具体实现方式：
+        严格拆分 Think 与 Act：
+            Think → 决策下一步要做什么，调用 LLM 输出“下一步想法”或“要调用的工具”
+            Act → 真正执行工具，把结果写入 memory
+        Prompt 分层设计
+            base_prompt → 用户指定 Agent 泛能力（业务/角色信息）
+            system_prompt → ReAct 标准范式，指导 LLM 在react范式下如何思考
+            next_step_prompt → 推进提示，保证 LLM 在非用户消息之后继续思考(这里有个小优化，如何防止next_step_prompt重复存储在memory中)
+        Memory驱动
+            所有 LLM 输出、工具调用、工具结果都写入 Memory，保证可追踪、可回溯

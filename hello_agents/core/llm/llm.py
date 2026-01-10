@@ -10,7 +10,6 @@ from openai import APIConnectionError, AsyncOpenAI, OpenAI, RateLimitError, Time
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 import tiktoken
 
-from hello_agents.core.exceptions import HelloAgentsException
 from hello_agents.core.llm.llm_prompt import SENSITIVE_PATTERNS, STRUCT_PARSE_TOOL_SYSTEM_PROMPT
 from hello_agents.core.agent.agent_schema import AgentContext
 from hello_agents.core.llm.llm_schema import PROVIDERS, FunctionCallType, LLMParams, ToolCallResponse, ToolChoice
@@ -158,7 +157,6 @@ class LLMClient:
     # token截断:倒序贪心+user边界对齐
     def truncate_message(
         self,
-        context: AgentContext,
         messages: List[Dict[str, Any]],
         max_input_tokens: int
     ):
@@ -199,6 +197,8 @@ class LLMClient:
         context: AgentContext,
         messages: List[Message],
         system_msgs: Optional[Message],
+        include_next_step_prompt: bool = False,
+        next_step_prompt: Optional[str] = None,
     ) -> List[dict]:
         # -------- 1.1 格式化 messages --------
         if system_msgs:
@@ -213,10 +213,14 @@ class LLMClient:
             formatted_messages = self.format_messages(
                 messages
             )
+        if include_next_step_prompt and next_step_prompt:
+            formatted_messages.append({
+                "role": "user",
+                "content": next_step_prompt,
+            })
         # -------- 1.2 截断输入 --------
         if self.params.max_tokens is not None:
             formatted_messages = self.truncate_message(
-                context=context,
                 messages=formatted_messages,
                 max_input_tokens=self.params.max_tokens,
             )
@@ -347,7 +351,9 @@ class LLMClient:
         tools: ToolCollection,
         tool_choice: ToolChoice | str,
         system_msgs: Optional[Message],
-        function_call_type: FunctionCallType | str = FunctionCallType.FUNCTION_CALL
+        function_call_type: FunctionCallType | str = FunctionCallType.FUNCTION_CALL,
+        include_next_step_prompt: bool = False,
+        next_step_prompt: Optional[str] = None,
     ) -> ToolCallResponse:
         try:
             # ===== 1. ToolChoice 校验=====
@@ -434,9 +440,14 @@ class LLMClient:
                     formatted_tools.append(tool_map)
 
             # ===== 3. 格式化消息 =====
-            formatted_messages = self._prepare_messages(
-                context, messages, system_msgs
-            )
+            if include_next_step_prompt:
+                formatted_messages = self._prepare_messages(
+                    context, messages, system_msgs, include_next_step_prompt, next_step_prompt
+                )
+            else:
+                formatted_messages = self._prepare_messages(
+                    context, messages, system_msgs
+                )
 
             # ===== 4. 调用 OpenAI =====
             payload = self.build_request_params(
