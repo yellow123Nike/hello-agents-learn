@@ -82,7 +82,7 @@ class ToolCollection:
             )
 
         else:
-            logger.error("Error: Unknown tool %s", name)
+            self.agent_context.printer.send("Error: Unknown tool %s", name)
 
         return None
 
@@ -91,7 +91,7 @@ class ToolCollection:
     # =============================
     def update_digital_employee(self, digital_employee: Optional[Dict[str, Any]]) -> None:
         if digital_employee is None:
-            logger.error(
+            self.agent_context.printer.send(
                 "requestId:%s setDigitalEmployee: %s",
                 self.agent_context.request_id if self.agent_context else None,
                 digital_employee,

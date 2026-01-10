@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
-from hello_agents.core.schema import AgentType
+
+from hello_agents.core.agent.agent_schema import AgentType
 
 
 class Printer(ABC):
