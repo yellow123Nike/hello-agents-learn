@@ -1,9 +1,10 @@
 # hello-agents-learn
 《从零开始构建智能体》——从零开始的智能体原理与实践教程 学习
+具体实现大部分以joyagent-jdagenie逻辑实现
 
 # agent架构
     与HelloAgents保持一致，agent架构分为三层：
-    核心架构层(core):包含agent基类、llm调用、消息管理、异常管理、配置管理
+    核心架构层(core):包含llm调用、agent基类、消息管理、异常管理、配置管理
     agent范式(agents_design):包含几种常见的agent范式-react、reflection、plan-solve
     工具层(tool):rag、mcp、skill等一概统一为工具
 
@@ -38,3 +39,24 @@
         ask_llm_once：一次性获取模型完整回复
         ask_llm_stream：实时获取模型生成结果
         ask_tool：工具/函数调用
+    
+## agent
+    Agent抽象类(BaseAgent)：定义一个智能体应该具备的通用行为和属性，并不关心具体实现方式。
+        __init__()清晰定义agent的核心依赖：
+            name：agent名称、
+            description：agent职责描述、
+            system_prompt：我是谁、我能做什么、不该做什么
+            next_step_prompt：这一轮我该做什么决策
+            llm：模型API
+            digital_employee_prompt：我在此agent场景下应该是一个什么角色
+            available_tools：可用工具集合
+            memory：上下文记忆
+            context：agent基础配置
+            state：agent状态(空闲\运行\完成\错误)
+            max_steps:防止无限推理
+            duplicate_threshold:防止模型陷入重复输出
+        step():唯一抽象方法,这一轮 Agent 怎么想、怎么行动？
+        run():生命周期控制+错误与终止处理
+        execute_tools:agent的基础能力，和HelloAgents理念一致，一切皆工具
+        update_memory：上下文内存管理,动态更新上下文
+    短期记忆组件(Memory): 负责维护、裁剪、读取“对话与执行历史”，为 LLM 下一步决策提供上下文。 

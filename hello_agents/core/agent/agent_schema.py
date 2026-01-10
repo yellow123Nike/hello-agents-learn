@@ -6,6 +6,17 @@ from hello_agents.core.tool.tool_collection import ToolCollection
 if TYPE_CHECKING:
     from hello_agents.core.printer.printer import Printer
 
+"""
+agent 状态枚举
+"""
+
+
+class AgentState(Enum):
+    IDLE = "IDLE"         # 空闲状态
+    RUNNING = "RUNNING"   # 运行状态
+    FINISHED = "FINISHED"  # 完成状态
+    ERROR = "ERROR"       # 错误状态
+
 
 @dataclass
 class AgentContext:
