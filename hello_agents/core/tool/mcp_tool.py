@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 class McpTool(BaseTool):
     """
-    对齐 Java: com.jd.genie.agent.tool.McpTool
+    MCP 工具实现类
     """
 
     def __init__(self, agent_context: "AgentContext"):
@@ -51,12 +51,9 @@ class McpTool(BaseTool):
         return "mcp_tool"
 
     def get_description(self) -> str:
-        # Java 版本也是返回空字符串
         return ""
 
     def to_params(self) -> Dict[str, Any]:
-        # Java 版本返回 null
-        # 这里返回空 dict，语义等价
         return {}
 
     def execute(self, input: Any) -> Any:

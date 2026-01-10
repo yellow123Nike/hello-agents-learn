@@ -5,7 +5,7 @@ from hello_agents.core.tool.base_tool import BaseTool
 from hello_agents.core.tool.tool_schema import McpToolInfo
 from hello_agents.core.tool.mcp_tool import McpTool
 if TYPE_CHECKING:
-    from hello_agents.core.agent.agent_context import AgentContext
+    from hello_agents.core.agent.agent_schema import AgentContext
 
 
 class ToolCollection:

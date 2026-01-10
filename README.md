@@ -60,3 +60,10 @@
         execute_tools:agent的基础能力，和HelloAgents理念一致，一切皆工具
         update_memory：上下文内存管理,动态更新上下文
     短期记忆组件(Memory): 负责维护、裁剪、读取“对话与执行历史”，为 LLM 下一步决策提供上下文。 
+
+## printer
+    输出方式抽象：把 Agent 的内部状态、过程和结果，以不同形式输出，Console/日志文件或其它方式
+
+## tool
+    工具抽象(basetool)：抽象工具描述(to_params)和工具执行逻辑(execute)。工具描述是告诉大模型这个工具需要什么参数。工具执行一旦 LLM 选定工具，系统就必须“无条件执行”
+    mcptool：
