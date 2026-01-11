@@ -100,7 +100,8 @@ class ReactAgent(BaseAgent):
 
             # ---------- 输出 thought ----------
             if not self.context.is_stream and response.content:
-                self.context.printer.send(f"tool_thought:{response.content}")
+                self.context.printer.send(
+                    f"tool_thought:{response.content}", "tool_thought")
 
             # ---------- assistant message ----------
             if self.tool_calls and self.llm.function_call_type != "struct_parse":
