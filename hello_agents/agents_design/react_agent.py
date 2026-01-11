@@ -13,7 +13,7 @@ from hello_agents.core.tool.file_util import FileUtil
 
 class ReactAgent(BaseAgent):
     """
-    Tool-call capable ReAct Agent
+    ReAct Agent
     """
 
     def __init__(self, context, llm):
@@ -71,10 +71,10 @@ class ReactAgent(BaseAgent):
             )
 
             self.system_prompt = self.system_prompt_snapshot.replace(
-                "{{files}}", files_str
+                "{files}", files_str
             )
             self.next_step_prompt = self.next_step_prompt_snapshot.replace(
-                "{{files}}", files_str
+                "{files}", files_str
             )
             # ----------如果user message不是最后一个消息，构建一个推进的提示词 ----------
             last_msg = self.memory.get_last_message()

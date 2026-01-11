@@ -79,9 +79,9 @@ class PlanSolveAgent(BaseAgent):
                 self.context.product_files, filter_internal_file=True
             )
             self.system_prompt = self.system_prompt_snapshot.replace(
-                "{{files}}", files_str)
+                "{files}", files_str)
             self.next_step_prompt = self.next_step_prompt_snapshot.replace(
-                "{{files}}", files_str)
+                "{files}", files_str)
 
             # ----------是否需要动态更新plan ----------
             if self.is_close_update and self.planning_tool.plan is not None:

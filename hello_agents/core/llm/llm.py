@@ -302,7 +302,12 @@ class LLMClient:
             ):
                 raise ValueError("Empty or invalid response from LLM")
 
-            return response.choices[0].message.content
+            return re.sub(
+                r"<think>.*?</think>",
+                "",
+                response.choices[0].message.content,
+                flags=re.DOTALL | re.IGNORECASE
+            ).strip()
 
         except Exception:
             self.age("%s ask_llm_once failed", context.request_id)
