@@ -196,14 +196,7 @@ class PlanSolveAgent(BaseAgent):
             # 在这里调用 reactagent实现该步骤的任务
             context = AgentContext(
                 request_id=f"{current_step}-context",
-                base_prompt=(
-                    """你是一位顶级的AI执行专家。你的任务是严格按照给定的计划，一步步地解决问题。
-                    你将收到原始问题、完整的计划、以及到目前为止已经完成的步骤和结果。
-                    请你专注于解决"当前步骤"，并仅输出该步骤的最终答案，不要输出任何额外的解释或对话。
-                    无工具时，结合自身能力回答问题
-                    """
-
-                ),
+                base_prompt=self.context.base_prompt,
                 date_info=self.context.date_info,
                 printer=self.context.printer,
             )
