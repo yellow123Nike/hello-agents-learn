@@ -6,7 +6,8 @@
     与HelloAgents保持一致，agent架构分为三层：
     核心架构层(core):包含llm调用、agent基类、消息管理、异常管理、配置管理
     agent范式(agents_design):包含几种常见的agent范式-react、reflection、plan-solve
-    工具层(tool):rag、mcp、skill等一概统一为工具
+    工具层(tool):rag、mcp、skill等一概统一为工具。"万物皆工具"--为什么这样设计，我觉得目前l唯一稳定、被模型强约束理解的对象，就是Tool。从逻辑上讲llm是大脑，tool是手。
+
 
 # core
 ## llm
@@ -41,7 +42,8 @@
         ask_tool：工具/函数调用
     
 ## agent
-    Agent抽象类(BaseAgent)：定义一个智能体应该具备的通用行为和属性，并不关心具体实现方式。
+Agent的设计模式为模板方法模式，这样流程在父类-行为在子类-系统级控制力更强。通过 run()固定 Agent 生命周期与控制流程，将可变行为下沉到 step()
+    Agent抽象类(BaseAgent)：定义一个智能体应该具备的通用行为和属性，并不关心具体实现方式。最重要的职责是生命周期控制
         __init__()清晰定义agent的核心依赖：
             name：agent名称、
             description：agent职责描述、
@@ -60,14 +62,30 @@
         execute_tools:agent的基础能力，和HelloAgents理念一致，一切皆工具
         update_memory：上下文内存管理,动态更新上下文
         generate_digital_employee:让 LLM 根据当前任务，动态“选择 / 生成一个合适的数字员工（角色 + 工具组合）”，并据此更新 Agent 当前可用的工具集合
-    短期记忆组件(Memory): 负责维护、裁剪、读取“对话与执行历史”，为 LLM 下一步决策提供上下文。 
+    agent_memory：单次agent的对话历史记录
+    记忆组件(Memory_tool): 负责存储和维护对话过程中的交互信息，核心是可持久化、可索引、可衰减的状态
+    上下文管理(AgentContext):当前 Agent Run 的“运行态快照”
+    GSSC治理(AgentContextManager):解决llm每一次调用时，如何拼装一个最优输入
+### AgentContextManager
+    问题：什么样的上下文配置，最有可能让模型产出我们期望的行为？
+    --系统提示词：语言清晰直白，且信息度
+    --上下文状态策略管理:包括工具、mcp、外部数据、消息历史等来源数据
+    问题：为什么上下文工程重要？
+    --尽管模型越来越强，但随着上下文窗口token的增加，模型会在一定程度上出现找准确信息能力的下降。因为这是源自llm的架构约束，transformer会让每个token都与上下文中的token建立注意力关联。
+
 
 ## printer
     输出方式抽象：把 Agent 的内部状态、过程和结果，以不同形式输出，Console/日志文件或其它方式
 
 ## tool
-    工具抽象(basetool)：抽象工具描述(to_params)和工具执行逻辑(execute)。工具描述是告诉大模型这个工具需要什么参数。工具执行一旦 LLM 选定工具，系统就必须“无条件执行”
-    mcptool：
+    工具抽象(basetool)：整个工具系统的核心抽象，它定义了所有工具必须遵循的接口规范
+        抽象工具描述(to_params)和工具执行逻辑(execute)。
+        工具描述是告诉大模型这个工具需要什么参数。
+        工具执行一旦 LLM 选定工具，系统就必须“无条件执行”
+        name和description用于告诉模型该工具的用途
+        这样设计的目的是解耦调度器与具体工具实现
+    大模型的工具调用(ToolCall):这里定义了openai接口的工具调用出参形式
+    大模型工具集合(ToolCollection): 用于添加工具、获取工具、执行工具(工具发现、格式化消息等应该抽取出来，而不是在llm调用时处理)
 
 # agents_design
     agents设计范式：react、reflection、plan-solve (hello-agent中的simpleagent本质上是一个react范式，故不实现，可直接通过react构造实例)
@@ -106,7 +124,7 @@
         sop_prompt：通过明确任务的目标、步骤以及预期结果来指导代理
         base_prompt:reactagent指导
     
-# reflection
+## reflection
     reflection的核心做完后再想如何更好,适用于对结果的准确性和可靠性有极高要求的场景
     具体范式可用抽象为：执行-loop(反思-优化)
     执行 (Execution)：使用ReAct 或 Plan-and-Solve尝试完成任务，生成一个初步的解决方案或行动轨迹
@@ -117,3 +135,14 @@
         initial_task:一次性完成初始任务
         think：使用 LLM 进行思考，决定下一步行动：是否应该优化，不管需不需要优化都调用工具
         act：基于反馈意见对文本进行优化
+    
+# tool
+  ## Memory System
+    对于基于LLM的智能体而言，通常面临两个根本性局限：模型对话状态的遗忘(每一次API调用都是一次独立、无关联的计算)和模型内置知识的局限(LLM 的知识是静态的、有限的)。
+    为此设计两种工具用于解决上述问题：MemoryTool 和 RAGTool
+
+
+# 实践
+
+##  Agent 系列（一）：Agent 结构化输出实测-效率快、准确率高、稳定性强间如何权衡
+ 具体内容见微信公众号：https://mp.weixin.qq.com/s/PvUbufb-2Sw1yH9S1K0GDg
