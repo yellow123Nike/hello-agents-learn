@@ -63,8 +63,9 @@ Agent的设计模式为模板方法模式，这样流程在父类-行为在子�
         update_memory：上下文内存管理,动态更新上下文
         generate_digital_employee:让 LLM 根据当前任务，动态“选择 / 生成一个合适的数字员工（角色 + 工具组合）”，并据此更新 Agent 当前可用的工具集合
     agent_memory：单次agent的对话历史记录
-    记忆组件(Memory_tool): 负责存储和维护对话过程中的交互信息，核心是可持久化、可索引、可衰减的状态
-    上下文管理(AgentContext):当前 Agent Run 的“运行态快照”
+    记忆组件(Memory_tool): 负责用户id的存储和维护对话过程中的交互信息，核心是可持久化、可索引、可衰减的状态
+    Agent上下文管理(AgentContext):当前 Agent Run 的“运行态快照”
+    消息上下文配置(ContextConfig):用于构建上下文的筛选参数配置
     GSSC治理(AgentContextManager):解决llm每一次调用时，如何拼装一个最优输入
 ### AgentContextManager
     问题：什么样的上下文配置，最有可能让模型产出我们期望的行为？
