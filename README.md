@@ -6,7 +6,7 @@
     与HelloAgents保持一致，agent架构分为三层：
     核心架构层(core):包含llm调用、agent基类、消息管理、异常管理、配置管理
     agent范式(agents_design):包含几种常见的agent范式-react、reflection、plan-solve
-    工具层(tool):rag、mcp、skill等一概统一为工具。"万物皆工具"--为什么这样设计，我觉得目前l唯一稳定、被模型强约束理解的对象，就是Tool。从逻辑上讲llm是大脑，tool是手。
+    工具层(tool):rag、mcp、skill等一概统一为工具。"万物皆工具"--为什么这样设计，我觉得目前唯一稳定、被模型强约束理解的对象，就是Tool。从逻辑上讲llm是大脑，tool是手。
 
 
 # core
@@ -62,21 +62,40 @@ Agent的设计模式为模板方法模式，这样流程在父类-行为在子�
         execute_tools:agent的基础能力，和HelloAgents理念一致，一切皆工具
         update_memory：上下文内存管理,动态更新上下文
         generate_digital_employee:让 LLM 根据当前任务，动态“选择 / 生成一个合适的数字员工（角色 + 工具组合）”，并据此更新 Agent 当前可用的工具集合
-    agent_memory：单次agent的对话历史记录
-    记忆组件(Memory_tool): 负责用户id的存储和维护对话过程中的交互信息，核心是可持久化、可索引、可衰减的状态
+        memory_tool：可选，跨会话用户级长期记忆工具（以 user_id 隔离）
+        context_config：可选，GSSC 上下文构建配置（token 预算、筛选策略等）
+    流转：run() 入口将 query 写入 agent_memory 并可选写入 memory_tool；每步前由 context_builder 构建最优上下文到 _last_built_context；每 10 条非 system 消息触发一次记忆整合（agent_memory → memory_tool 的 episodic）；run() 结束时 _finalize_memory_lifecycle：将本轮结果写入 memory_tool（semantic），并对 agent_memory 做智能遗忘（清工具上下文、截断最近 N 条）。
+
+    agent_memory（Memory）：单次 Agent 的对话历史
+        以 agent_id/request_id 为隔离，生命周期为单次 Agent 执行阶段，内存存储，仅用于构建单次 Agent 的上下文。
+    MemoryTool：用户级跨会话持久化记忆
+        以 user_id 为隔离，生命周期为跨会话持久化，用于解决对话状态遗忘；记忆来源：query、Agent 上下文、Agent 结果等。
+        MemoryTool 操作分为两类：
+        1）与 Agent 上下文交互：search（检索）、consolidate（整合）、forget（遗忘）——供 ContextBuilder、BaseAgent 记忆生命周期使用；
+        2）额外 pipeline 工具：add、update、remove、summary、stats、clear_all——由 LLM 或其它流水线按需调用。
     Agent上下文管理(AgentContext):当前 Agent Run 的“运行态快照”
-    消息上下文配置(ContextConfig):用于构建上下文的筛选参数配置
-    GSSC治理(AgentContextManager):解决llm每一次调用时，如何拼装一个最优输入
-### AgentContextManager
+    消息上下文配置(ContextConfig):用于构建上下文的筛选参数配置（max_tokens、reserve_ratio、min_relevance、top_n 等）
+    GSSC 流水线（ContextBuilder）：解决每一次模型调用时如何拼装最优上下文
+        知识/记忆 → 上下文：Gather（从 memory_tool、RAG、agent_memory 收集）→ Select（相关性+新近性筛选、token 预算）→ Structure（Role/Task/State/Evidence/Context/Output）→ Compress（超预算时截断）。
+        上下文 → 记忆：每 10 条非 system 消息做一次记忆整合（agent_memory 最近片段写入 memory_tool 的 episodic）；单次 Agent 结束时对 agent_memory 做智能遗忘（清工具上下文、保留系统指令与最近对话）。
+### AgentContextManager / ContextBuilder
     问题：什么样的上下文配置，最有可能让模型产出我们期望的行为？
     --系统提示词：语言清晰直白，且信息度
-    --上下文状态策略管理:包括工具、mcp、外部数据、消息历史等来源数据
+    --上下文状态策略管理:包括工具、mcp、外部数据、消息历史、memory_tool、RAG 等来源数据
     问题：为什么上下文工程重要？
-    --尽管模型越来越强，但随着上下文窗口token的增加，模型会在一定程度上出现找准确信息能力的下降。因为这是源自llm的架构约束，transformer会让每个token都与上下文中的token建立注意力关联。
+    --尽管模型越来越强，但随着上下文窗口 token 的增加，模型会在一定程度上出现找准确信息能力的下降。因为这是源自 llm 的架构约束，transformer 会让每个 token 都与上下文中的 token 建立注意力关联。
 
 
 ## printer
     输出方式抽象：把 Agent 的内部状态、过程和结果，以不同形式输出，Console/日志文件或其它方式
+
+## storage（存储层）
+    文档形态抽象为 DocumentModel（Pydantic BaseModel）：id、content、metadata（可含 score）；与 Message 互转（DocumentModel.from_message / to_message），供 BaseStore 及子类统一使用。
+    BaseStore：抽象「创建 database、创建集合、增删改查、检索」；add/update 入参支持 Message、DocumentModel 或 dict；get_as_document / search_as_documents / retrieve_by_ids_as_documents 返回 DocumentModel，get_as_message / search_as_messages 返回 Message。
+    实现：
+        ChromaDBStore：持久化目录为 database，collection 对应 Chroma collection，检索为向量相似度；
+        Neo4jStore：database 为 Neo4j 库名，collection 为节点标签（如 Document_xxx），检索为 content CONTAINS + metadata 过滤；
+        SQLiteDocumentStore：database 为单文件路径，collection 为表名（如 doc_xxx），检索为 content LIKE。
 
 ## tool
     工具抽象(basetool)：整个工具系统的核心抽象，它定义了所有工具必须遵循的接口规范
@@ -139,8 +158,12 @@ Agent的设计模式为模板方法模式，这样流程在父类-行为在子�
     
 # tool
   ## Memory System
-    对于基于LLM的智能体而言，通常面临两个根本性局限：模型对话状态的遗忘(每一次API调用都是一次独立、无关联的计算)和模型内置知识的局限(LLM 的知识是静态的、有限的)。
-    为此设计两种工具用于解决上述问题：MemoryTool 和 RAGTool
+    对于基于 LLM 的智能体而言，通常面临两个根本性局限：模型对话状态的遗忘（每一次 API 调用都是一次独立、无关联的计算）和模型内置知识的局限（LLM 的知识是静态的、有限的）。
+    为此设计两种工具用于解决上述问题：MemoryTool 和 RAGTool。
+    MemoryTool：以 user_id 为隔离，跨会话持久化（当前实现为本地 JSON 文件 memory_storage/{user_id}.json）。操作分为与 Agent 上下文交互（search、consolidate、forget）与额外 pipeline（add、summary、stats、update、remove、clear_all）。继承 BaseTool，提供 to_params/execute。
+    RAGTool：外部知识库，解决模型内置知识局限；与 BaseStore 可结合（如使用 ChromaDBStore/SQLite 等做检索后端）。
+  ## 存储（storage）
+    见 core/storage：BaseStore + DocumentModel，实现 ChromaDB、Neo4j、SQLite 文档存储；文档形态统一为 DocumentModel，可与 Message 互转。
 
 
 # 实践

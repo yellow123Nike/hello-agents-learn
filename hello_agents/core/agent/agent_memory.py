@@ -39,7 +39,6 @@ class Memory:
     # ----------------------------
     # 读取消息
     # ----------------------------
-
     def get_last_message(self):
         return self.messages[-1] if self.messages else None
 

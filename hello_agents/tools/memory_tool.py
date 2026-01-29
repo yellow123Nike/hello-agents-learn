@@ -1,19 +1,21 @@
 """记忆工具
 
 为 hello-agents-learn 框架提供**跨会话持久化记忆**能力。
-可以作为工具添加到任何 Agent 中，让 Agent 具备“长期记忆”功能。
+以 `user_id` 为隔离标识，负责跨会话、可持久化、可检索、可衰减的长期记忆管理。
 
-职责与特性（与 `agent_memory.Memory` 区分）：
+操作分为两类：
 
-- **Memory（agent_memory）**：以 `agent_id/request_id` 为粒度，单次执行期的短期对话上下文，仅存在于内存中，不做持久化。
-- **MemoryTool（本文件）**：以 `user_id` 为隔离标识，负责**跨会话、可持久化、可检索、可衰减**的长期记忆管理。
+1. **与 Agent 上下文交互的操作**（供 Agent / ContextBuilder 在构建上下文、记忆整合、智能遗忘时使用）：
+   - **search**（_search_memory）：按 query 检索相关记忆，用于拼装最优上下文。
+   - **consolidate**（_consolidate）：将短期记忆整合为长期记忆（如 working → episodic）。
+   - **forget**（_forget）：按策略遗忘低价值或过期记忆。
 
-实现说明：
+2. **额外 pipeline 工具**（由 LLM 或其它流水线按需调用）：
+   - add / update / remove / clear_all：记忆的增删改查与清空。
+   - summary / stats：摘要与统计。
 
-- 当前实现采用 **本地 JSON 文件** 作为简单的持久化后端：
-  - 存储路径：`<项目根>/memory_storage/{user_id}.json`
-  - 结构：`[{"id": "...", "content": "...", "memory_type": "...", "importance": 0.5, "timestamp": "...", "metadata": {...}}, ...]`
-- 对外暴露统一的工具接口：`execute(input: Any) -> Any`，兼容 LLM 的工具调用规范。
+持久化：本地 JSON 文件 `<项目根>/memory_storage/{user_id}.json`。
+对外接口：`execute(input: Any) -> Any`，兼容 BaseTool 与 LLM 工具调用规范。
 """
 
 from __future__ import annotations
@@ -31,10 +33,15 @@ class MemoryTool(BaseTool):
     """
     记忆工具 - 提供可持久化、可索引、可衰减的记忆管理。
 
-    用途：
-    - 由 Agent 在合适的时机（如：任务结束、每 N 轮对话）写入重要记忆
-    - 由上下文管理器（ContextManager / ContextBuilder）在构建上下文时检索相关记忆
+    操作分类：
+    - **与 Agent 上下文交互**：search（检索）、consolidate（整合）、forget（遗忘）
+    - **额外 pipeline 工具**：add / update / remove / summary / stats / clear_all 等
     """
+
+    # 与 Agent 上下文交互的 action（供 ContextBuilder、BaseAgent 记忆生命周期使用）
+    AGENT_CONTEXT_ACTIONS = frozenset({"search", "consolidate", "forget"})
+    # 额外 pipeline 的 action（由 LLM 或其它流水线调用）
+    PIPELINE_ACTIONS = frozenset({"add", "summary", "stats", "update", "remove", "clear_all"})
 
     name = "memory"
     description = (
@@ -107,7 +114,28 @@ class MemoryTool(BaseTool):
 
         action = parameters.get("action")
 
-        # 根据action调用对应的方法，传入提取的参数
+        # -------- 1. 与 Agent 上下文交互的操作 --------
+        if action == "search":
+            return self._search_memory(
+                query=parameters.get("query"),
+                limit=parameters.get("limit", 5),
+                memory_type=parameters.get("memory_type"),
+                min_importance=parameters.get("min_importance", 0.1)
+            )
+        if action == "consolidate":
+            return self._consolidate(
+                from_type=parameters.get("from_type", "working"),
+                to_type=parameters.get("to_type", "episodic"),
+                importance_threshold=parameters.get("importance_threshold", 0.7)
+            )
+        if action == "forget":
+            return self._forget(
+                strategy=parameters.get("strategy", "importance_based"),
+                threshold=parameters.get("threshold", 0.1),
+                max_age_days=parameters.get("max_age_days", 30)
+            )
+
+        # -------- 2. 额外 pipeline 工具 --------
         if action == "add":
             return self._add_memory(
                 content=parameters.get("content", ""),
@@ -116,55 +144,36 @@ class MemoryTool(BaseTool):
                 file_path=parameters.get("file_path"),
                 modality=parameters.get("modality")
             )
-        elif action == "search":
-            return self._search_memory(
-                query=parameters.get("query"),
-                limit=parameters.get("limit", 5),
-                memory_type=parameters.get("memory_type"),
-                min_importance=parameters.get("min_importance", 0.1)
-            )
-        elif action == "summary":
+        if action == "summary":
             return self._get_summary(limit=parameters.get("limit", 10))
-        elif action == "stats":
+        if action == "stats":
             return self._get_stats()
-        elif action == "update":
+        if action == "update":
             return self._update_memory(
                 memory_id=parameters.get("memory_id"),
                 content=parameters.get("content"),
                 importance=parameters.get("importance")
             )
-        elif action == "remove":
+        if action == "remove":
             return self._remove_memory(memory_id=parameters.get("memory_id"))
-        elif action == "forget":
-            return self._forget(
-                strategy=parameters.get("strategy", "importance_based"),
-                threshold=parameters.get("threshold", 0.1),
-                max_age_days=parameters.get("max_age_days", 30)
-            )
-        elif action == "consolidate":
-            return self._consolidate(
-                from_type=parameters.get("from_type", "working"),
-                to_type=parameters.get("to_type", "episodic"),
-                importance_threshold=parameters.get("importance_threshold", 0.7)
-            )
-        elif action == "clear_all":
+        if action == "clear_all":
             return self._clear_all()
-        else:
-            return f"❌ 不支持的操作: {action}"
+
+        return f"❌ 不支持的操作: {action}"
 
     def to_params(self) -> Dict[str, Any]:
-        """返回工具参数定义 - BaseTool 要求的接口"""
+        """返回工具参数定义 - BaseTool 要求的接口。action 分为：与 Agent 上下文交互(search/consolidate/forget)、额外 pipeline(add/summary/stats/update/remove/clear_all)。"""
         return {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
                     "description": (
-                        "要执行的操作："
-                        "add(添加记忆), search(搜索记忆), summary(获取摘要), stats(获取统计), "
-                        "update(更新记忆), remove(删除记忆), forget(遗忘记忆), consolidate(整合记忆), clear_all(清空所有记忆)"
+                        "操作类型。"
+                        "与 Agent 上下文交互: search(检索记忆), consolidate(整合记忆), forget(遗忘记忆)。"
+                        "额外 pipeline: add(添加), summary(摘要), stats(统计), update(更新), remove(删除), clear_all(清空)。"
                     ),
-                    "enum": ["add", "search", "summary", "stats", "update", "remove", "forget", "consolidate", "clear_all"]
+                    "enum": ["search", "consolidate", "forget", "add", "summary", "stats", "update", "remove", "clear_all"]
                 },
                 "content": {"type": "string", "description": "记忆内容（add/update时可用；感知记忆可作描述）"},
                 "query": {"type": "string", "description": "搜索查询（search时可用）"},
@@ -185,7 +194,7 @@ class MemoryTool(BaseTool):
         }
 
     # ------------------------------------------------------------------
-    # 内部工具方法：参数校验 & 持久化
+    # 内部：参数校验 & 持久化
     # ------------------------------------------------------------------
     def _validate_parameters(self, parameters: Dict[str, Any]) -> bool:
         """最小化参数校验（只校验 action 必填）"""
@@ -221,7 +230,159 @@ class MemoryTool(BaseTool):
             pass
 
     # ------------------------------------------------------------------
-    # 记忆增删改查 & 策略
+    # 1. 与 Agent 上下文交互的操作：search / consolidate / forget
+    # ------------------------------------------------------------------
+    def _search_memory(
+        self,
+        query: str,
+        limit: int = 5,
+        memory_type: str = None,
+        min_importance: float = 0.1
+    ) -> str:
+        """搜索记忆（与 Agent 上下文交互：供 ContextBuilder 等拼装最优上下文时检索）
+
+        Args:
+            query: 搜索查询内容
+            limit: 搜索结果数量限制
+            memory_type: 限定记忆类型：working/episodic/semantic/perceptual
+            min_importance: 最低重要性阈值
+
+        Returns:
+            搜索结果
+        """
+        try:
+            results: List[Dict[str, Any]] = []
+            q = (query or "").lower()
+            for m in self._memories:
+                if m.get("importance", 0.0) < float(min_importance):
+                    continue
+                if memory_type and m.get("memory_type") != memory_type:
+                    continue
+                if q and q not in (m.get("content") or "").lower():
+                    continue
+                results.append(m)
+
+            results = results[: max(0, int(limit))]
+
+            if not results:
+                return f"🔍 未找到与 '{query}' 相关的记忆"
+
+            formatted_results: List[str] = []
+            formatted_results.append(f"🔍 找到 {len(results)} 条相关记忆:")
+
+            for i, memory in enumerate(results, 1):
+                memory_type_label = {
+                    "working": "工作记忆",
+                    "episodic": "情景记忆",
+                    "semantic": "语义记忆",
+                    "perceptual": "感知记忆",
+                }.get(memory.get("memory_type", "working"), memory.get("memory_type", "working"))
+
+                content_str = memory.get("content", "") or ""
+                content_preview = content_str[:80] + "..." if len(content_str) > 80 else content_str
+                formatted_results.append(
+                    f"{i}. [{memory_type_label}] {content_preview} (重要性: {memory.get('importance', 0):.2f})"
+                )
+
+            return "\n".join(formatted_results)
+
+        except Exception as e:
+            return f"❌ 搜索记忆失败: {str(e)}"
+
+    def _consolidate(
+        self,
+        from_type: str = "working",
+        to_type: str = "episodic",
+        importance_threshold: float = 0.7
+    ) -> str:
+        """整合记忆（与 Agent 上下文交互：将短期记忆提升为长期记忆）
+
+        Args:
+            from_type: 来源记忆类型
+            to_type: 目标记忆类型
+            importance_threshold: 整合的重要性阈值
+
+        Returns:
+            执行结果
+        """
+        try:
+            count = 0
+            for m in self._memories:
+                if (
+                    m.get("memory_type") == from_type
+                    and float(m.get("importance", 0.0)) >= float(importance_threshold)
+                ):
+                    m["memory_type"] = to_type
+                    count += 1
+
+            if count > 0:
+                self._save_memories()
+            return f"🔄 已整合 {count} 条记忆为长期记忆（{from_type} → {to_type}，阈值={importance_threshold}）"
+        except Exception as e:
+            return f"❌ 整合记忆失败: {str(e)}"
+
+    def _forget(
+        self,
+        strategy: str = "importance_based",
+        threshold: float = 0.1,
+        max_age_days: int = 30
+    ) -> str:
+        """遗忘记忆（与 Agent 上下文交互：按策略智能遗忘低价值或过期记忆）
+
+        Args:
+            strategy: 遗忘策略：importance_based/time_based/capacity_based
+            threshold: 遗忘阈值（importance_based时使用）
+            max_age_days: 最大保留天数（time_based时使用）
+
+        Returns:
+            执行结果
+        """
+        try:
+            before = len(self._memories)
+            now = datetime.now()
+            remaining: List[Dict[str, Any]] = []
+
+            for m in self._memories:
+                importance_val = float(m.get("importance", 0.0))
+                ts_str = m.get("timestamp")
+                try:
+                    ts = datetime.fromisoformat(ts_str) if ts_str else now
+                except Exception:
+                    ts = now
+                age_days = (now - ts).days
+
+                keep = True
+                if strategy == "importance_based" and importance_val < float(threshold):
+                    keep = False
+                elif strategy == "time_based" and age_days > int(max_age_days):
+                    keep = False
+                elif strategy == "capacity_based":
+                    keep = True
+
+                if keep:
+                    remaining.append(m)
+
+            if strategy == "capacity_based" and remaining:
+                max_count = int(len(remaining) * float(threshold))
+                if max_count <= 0:
+                    remaining = []
+                else:
+                    remaining = sorted(
+                        remaining,
+                        key=lambda x: float(x.get("importance", 0.0)),
+                        reverse=True,
+                    )[:max_count]
+
+            self._memories = remaining
+            self._save_memories()
+
+            removed = before - len(self._memories)
+            return f"🧹 已遗忘 {removed} 条记忆（策略: {strategy}）"
+        except Exception as e:
+            return f"❌ 遗忘记忆失败: {str(e)}"
+
+    # ------------------------------------------------------------------
+    # 2. 额外 pipeline 工具：add / summary / stats / update / remove / clear_all
     # ------------------------------------------------------------------
     def _add_memory(
         self,
@@ -300,64 +461,6 @@ class MemoryTool(BaseTool):
             return "text"
         except Exception:
             return "text"
-
-    def _search_memory(
-        self,
-        query: str,
-        limit: int = 5,
-        memory_type: str = None,
-        min_importance: float = 0.1
-    ) -> str:
-        """搜索记忆
-
-        Args:
-            query: 搜索查询内容
-            limit: 搜索结果数量限制
-            memory_type: 限定记忆类型：working/episodic/semantic/perceptual
-            min_importance: 最低重要性阈值
-
-        Returns:
-            搜索结果
-        """
-        try:
-            results: List[Dict[str, Any]] = []
-            q = (query or "").lower()
-            for m in self._memories:
-                if m.get("importance", 0.0) < float(min_importance):
-                    continue
-                if memory_type and m.get("memory_type") != memory_type:
-                    continue
-                if q and q not in (m.get("content") or "").lower():
-                    continue
-                results.append(m)
-
-            results = results[: max(0, int(limit))]
-
-            if not results:
-                return f"🔍 未找到与 '{query}' 相关的记忆"
-
-            # 格式化结果
-            formatted_results: List[str] = []
-            formatted_results.append(f"🔍 找到 {len(results)} 条相关记忆:")
-
-            for i, memory in enumerate(results, 1):
-                memory_type_label = {
-                    "working": "工作记忆",
-                    "episodic": "情景记忆",
-                    "semantic": "语义记忆",
-                    "perceptual": "感知记忆",
-                }.get(memory.get("memory_type", "working"), memory.get("memory_type", "working"))
-
-                content_str = memory.get("content", "") or ""
-                content_preview = content_str[:80] + "..." if len(content_str) > 80 else content_str
-                formatted_results.append(
-                    f"{i}. [{memory_type_label}] {content_preview} (重要性: {memory.get('importance', 0):.2f})"
-                )
-
-            return "\n".join(formatted_results)
-
-        except Exception as e:
-            return f"❌ 搜索记忆失败: {str(e)}"
 
     def _get_summary(self, limit: int = 10) -> str:
         """获取记忆摘要
@@ -528,91 +631,6 @@ class MemoryTool(BaseTool):
         except Exception as e:
             return f"❌ 删除记忆失败: {str(e)}"
 
-    def _forget(self, strategy: str = "importance_based", threshold: float = 0.1, max_age_days: int = 30) -> str:
-        """遗忘记忆（支持多种策略）
-
-        Args:
-            strategy: 遗忘策略：importance_based(基于重要性)/time_based(基于时间)/capacity_based(基于容量)
-            threshold: 遗忘阈值（importance_based时使用）
-            max_age_days: 最大保留天数（time_based时使用）
-
-        Returns:
-            执行结果
-        """
-        try:
-            before = len(self._memories)
-            now = datetime.now()
-            remaining: List[Dict[str, Any]] = []
-
-            for m in self._memories:
-                importance_val = float(m.get("importance", 0.0))
-                ts_str = m.get("timestamp")
-                try:
-                    ts = datetime.fromisoformat(ts_str) if ts_str else now
-                except Exception:
-                    ts = now
-                age_days = (now - ts).days
-
-                keep = True
-                if strategy == "importance_based" and importance_val < float(threshold):
-                    keep = False
-                elif strategy == "time_based" and age_days > int(max_age_days):
-                    keep = False
-                elif strategy == "capacity_based":
-                    # 简单实现：超过阈值则按重要性从低到高丢弃
-                    # 这里 threshold 被解释为“最大保留条数比例”，例如 0.8 表示只保留 80% 最新/重要的
-                    keep = True  # 先全部保留，后面统一处理
-
-                if keep:
-                    remaining.append(m)
-
-            # capacity_based 的二次处理
-            if strategy == "capacity_based" and remaining:
-                max_count = int(len(remaining) * float(threshold))
-                if max_count <= 0:
-                    remaining = []
-                else:
-                    remaining = sorted(
-                        remaining,
-                        key=lambda x: float(x.get("importance", 0.0)),
-                        reverse=True,
-                    )[:max_count]
-
-            self._memories = remaining
-            self._save_memories()
-
-            removed = before - len(self._memories)
-            return f"🧹 已遗忘 {removed} 条记忆（策略: {strategy}）"
-        except Exception as e:
-            return f"❌ 遗忘记忆失败: {str(e)}"
-
-    def _consolidate(self, from_type: str = "working", to_type: str = "episodic", importance_threshold: float = 0.7) -> str:
-        """整合记忆（将重要的短期记忆提升为长期记忆）
-
-        Args:
-            from_type: 来源记忆类型
-            to_type: 目标记忆类型
-            importance_threshold: 整合的重要性阈值
-
-        Returns:
-            执行结果
-        """
-        try:
-            count = 0
-            for m in self._memories:
-                if (
-                    m.get("memory_type") == from_type
-                    and float(m.get("importance", 0.0)) >= float(importance_threshold)
-                ):
-                    m["memory_type"] = to_type
-                    count += 1
-
-            if count > 0:
-                self._save_memories()
-            return f"🔄 已整合 {count} 条记忆为长期记忆（{from_type} → {to_type}，阈值={importance_threshold}）"
-        except Exception as e:
-            return f"❌ 整合记忆失败: {str(e)}"
-
     def _clear_all(self) -> str:
         """清空所有记忆
 
@@ -677,10 +695,3 @@ class MemoryTool(BaseTool):
         self.current_session_id = None
         self.conversation_count = 0
 
-    def consolidate_memories(self):
-        """整合记忆（便捷方法，等价于调用 _consolidate 默认参数）"""
-        return self._consolidate()
-
-    def forget_old_memories(self, max_age_days: int = 30):
-        """遗忘旧记忆（便捷方法，基于时间窗口）"""
-        return self._forget(strategy="time_based", max_age_days=max_age_days)
